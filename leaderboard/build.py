@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""MMQFS leaderboard builder. Standard library only.
+
+    python3 leaderboard/build.py            validate points.csv, then write LEADERBOARD.md
+    python3 leaderboard/build.py --check    validate only
+
+points.csv columns: date, member, category, points, reason, awarded_by
+Rules live in rules.json. Nothing is written if validation fails.
+"""
+import argparse
+import csv
+import json
+import re
+import sys
+from collections import defaultdict
+from datetime import date
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+COLUMNS = ["date", "member", "category", "points", "reason", "awarded_by"]
+# First name and last initial only, e.g. "Henry F."
+NAME = re.compile(r"^[A-Z][A-Za-z'\-]+ [A-Z]\.$")
+MIN_REASON = 5
+
+
+def load_rules(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def points_ok(rule, points):
+    if "allowed" in rule:
+        return points in rule["allowed"]
+    return rule["min"] <= points <= rule["max"]
+
+
+def describe(rule):
+    if "allowed" in rule:
+        return "one of " + ", ".join(str(p) for p in rule["allowed"])
+    return f"{rule['min']} to {rule['max']}"
+
+
+def load_rows(csv_path, rules):
+    """Return (rows, errors). Rows are only trustworthy when errors is empty."""
+    errors, rows = [], []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if header != COLUMNS:
+            return [], [f"header must be exactly: {','.join(COLUMNS)}"]
+        seen = set()
+        for lineno, raw in enumerate(reader, start=2):
+            if not any(cell.strip() for cell in raw):
+                continue
+            if len(raw) != len(COLUMNS):
+                errors.append(f"line {lineno}: expected {len(COLUMNS)} columns, got {len(raw)}")
+                continue
+            d, member, category, pts, reason, by = [c.strip() for c in raw]
+            if any("@" in c for c in raw):
+                errors.append(f"line {lineno}: contains '@' (no email addresses)")
+                continue
+            try:
+                when = date.fromisoformat(d)
+            except ValueError:
+                errors.append(f"line {lineno}: date '{d}' is not YYYY-MM-DD")
+                continue
+            if not NAME.match(member):
+                errors.append(f"line {lineno}: member '{member}' must be first name and last initial, e.g. 'Henry F.'")
+                continue
+            if not NAME.match(by):
+                errors.append(f"line {lineno}: awarded_by '{by}' must be first name and last initial")
+                continue
+            if member == by:
+                errors.append(f"line {lineno}: self-award ({member} cannot award themselves)")
+                continue
+            if category not in rules["categories"]:
+                errors.append(f"line {lineno}: unknown category '{category}'")
+                continue
+            try:
+                value = int(pts)
+            except ValueError:
+                errors.append(f"line {lineno}: points '{pts}' is not a whole number")
+                continue
+            rule = rules["categories"][category]
+            if not points_ok(rule, value):
+                errors.append(f"line {lineno}: {category} points must be {describe(rule)}, got {value}")
+                continue
+            if len(reason) < MIN_REASON:
+                errors.append(f"line {lineno}: every award needs a written reason")
+                continue
+            key = (d, member, category, reason.lower())
+            if key in seen:
+                errors.append(f"line {lineno}: duplicate award (one award per contribution)")
+                continue
+            seen.add(key)
+            rows.append({"date": when, "member": member, "category": category,
+                         "points": value, "reason": reason, "by": by, "order": lineno})
+    return rows, errors
+
+
+def score(rows, rules):
+    """Apply the monthly cap per member and category. Returns scored rows."""
+    cap = rules["monthly_cap_per_category"]
+    used = defaultdict(int)
+    scored = []
+    for r in sorted(rows, key=lambda r: (r["date"], r["order"])):
+        key = (r["member"], r["category"], r["date"].year, r["date"].month)
+        counted = max(0, min(r["points"], cap - used[key]))
+        used[key] += counted
+        scored.append({**r, "counted": counted, "capped": counted < r["points"]})
+    return scored
+
+
+def ranked(totals):
+    """Standard competition ranking: 1, 2, 2, 4. Ties sorted by name."""
+    items = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    out, prev, rank = [], None, 0
+    for i, (name, pts) in enumerate(items, start=1):
+        if pts != prev:
+            rank, prev = i, pts
+        out.append((rank, name, pts))
+    return out
+
+
+def esc(text):
+    return text.replace("|", "\\|")
+
+
+def render(scored, rules):
+    lines = ["# MMQFS Leaderboard", "",
+             "_Generated by `leaderboard/build.py` from `points.csv`. Do not edit by hand._", ""]
+    overall = defaultdict(int)
+    by_cat = {c: defaultdict(int) for c in rules["categories"]}
+    for r in scored:
+        overall[r["member"]] += r["counted"]
+        by_cat[r["category"]][r["member"]] += r["counted"]
+
+    lines += ["## Overall", ""]
+    table = [(rk, n, p) for rk, n, p in ranked(overall) if p > 0]
+    if table:
+        lines += ["| Rank | Member | Points |", "|---:|---|---:|"]
+        lines += [f"| {rk} | {esc(n)} | {p} |" for rk, n, p in table]
+    else:
+        lines.append("No awards yet.")
+    lines.append("")
+
+    lines += ["## By category", ""]
+    for cat, rule in rules["categories"].items():
+        lines += [f"### {rule['label']}", ""]
+        rows = [(rk, n, p) for rk, n, p in ranked(by_cat[cat]) if p > 0]
+        if rows:
+            lines += ["| Rank | Member | Points |", "|---:|---|---:|"]
+            lines += [f"| {rk} | {esc(n)} | {p} |" for rk, n, p in rows]
+        else:
+            lines.append("No awards yet.")
+        lines.append("")
+
+    lines += ["## Latest awards", ""]
+    latest = sorted(scored, key=lambda r: (r["date"], r["order"]), reverse=True)[:5]
+    if latest:
+        lines += ["| Date | Member | Category | Points | Reason | Awarded by |",
+                  "|---|---|---|---:|---|---|"]
+        for r in latest:
+            pts = f"{r['counted']}" + (" †" if r["capped"] else "")
+            lines.append(f"| {r['date'].isoformat()} | {esc(r['member'])} | "
+                         f"{esc(rules['categories'][r['category']]['label'])} | {pts} | "
+                         f"{esc(r['reason'])} | {esc(r['by'])} |")
+        if any(r["capped"] for r in latest):
+            lines += ["", f"† Reduced by the monthly cap of {rules['monthly_cap_per_category']} "
+                          "points per category per member."]
+    else:
+        lines.append("No awards yet.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--check", action="store_true", help="validate only, write nothing")
+    p.add_argument("--csv", default=str(HERE / "points.csv"))
+    p.add_argument("--rules", default=str(HERE / "rules.json"))
+    p.add_argument("--out", default=str(HERE / "LEADERBOARD.md"))
+    args = p.parse_args(argv)
+
+    rules = load_rules(args.rules)
+    rows, errors = load_rows(args.csv, rules)
+    if errors:
+        print("points.csv has problems:", file=sys.stderr)
+        for e in errors:
+            print(f"  {e}", file=sys.stderr)
+        return 1
+    if args.check:
+        print(f"points.csv OK ({len(rows)} awards).")
+        return 0
+    Path(args.out).write_text(render(score(rows, rules), rules), encoding="utf-8")
+    print(f"Wrote {args.out} ({len(rows)} awards).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

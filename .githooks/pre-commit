@@ -1,0 +1,12 @@
+#!/bin/sh
+# Blocks a commit unless the author address is a GitHub noreply address
+# and the staged files pass the privacy check.
+email=$(git config user.email)
+case "$email" in
+  *@users.noreply.github.com) ;;
+  *)
+    echo "Commit blocked: git user.email must be your GitHub noreply address (got '$email')." >&2
+    exit 1
+    ;;
+esac
+python3 scripts/privacy_check.py

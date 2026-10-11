@@ -1,0 +1,12 @@
+{
+  "monthly_cap_per_category": 15,
+  "categories": {
+    "puzzle_writeup": {"label": "Puzzle write-ups", "min": 3, "max": 5},
+    "tournament": {"label": "Tournaments", "allowed": [10, 7, 5, 2]},
+    "pitch": {"label": "Stock pitches", "allowed": [5, 3]},
+    "research_note": {"label": "Research notes", "allowed": [3]},
+    "tool": {"label": "Tools and code", "allowed": [5]},
+    "helping": {"label": "Helping others", "allowed": [2]},
+    "attendance": {"label": "Attendance", "allowed": [1]}
+  }
+}
