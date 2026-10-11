@@ -22,4 +22,4 @@ Public repository of the Marlborough College Mathematics and Quantitative Financ
 
 ## Layout
 
-`puzzles/`, `pitches/`, `resources/`, `tools/`, `leaderboard/`, `scripts/`, `tests/`.
+`puzzles/`, `leaderboard/`, `scripts/`, `tests/`.

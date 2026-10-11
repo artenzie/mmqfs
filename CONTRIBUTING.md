@@ -18,8 +18,6 @@ You don't need to know Git. You can add a puzzle write-up in about five minutes 
 5. Press **Commit changes**. If GitHub asks, choose **Create a new branch and start a pull request** (or **Propose changes**), then **Create pull request**.
 6. The Scorekeeper will review it. If it's good, they'll merge it and add your points.
 
-The same steps work for `pitches/`, `resources/` and `tools/`.
-
 ## How points work
 
 Points live in `leaderboard/points.csv` and the rules in `leaderboard/rules.json`.

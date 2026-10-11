@@ -28,9 +28,6 @@ Ask any member, or come to a session.
 | Folder | Contents |
 |---|---|
 | `puzzles/` | Puzzle write-ups, one file per puzzle |
-| `pitches/` | Stock pitch theses and slides |
-| `resources/` | Reading lists and study notes |
-| `tools/` | Code written by members |
 | `leaderboard/` | Points data, rules and the current standings |
 | `scripts/` | Privacy check used by contributors |
 
